@@ -1,6 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { TUNING } from "../engine/tuning.js";
 import { mulberry } from "../engine/rng.js";
+import { createRules } from "../engine/rules.js";
+import { createSolver } from "../engine/solver.js";
+import { createGenerator } from "../engine/generator.js";
 
 /* if the worker cannot start we fall back to running inline */
 function makeWorker() {
@@ -14,15 +17,16 @@ function makeWorker() {
 
 /* ═══════════════════════════════════════════════════════════════
    usePuzzleSource — asks the worker for a puzzle, falls back to the
-   main thread. Knows nothing about rendering.
+   main thread. Knows nothing about rendering. `base` is the first seed
+   tried (random when omitted); the same base and options always give
+   the same puzzle.
    ═══════════════════════════════════════════════════════════════ */
-export function usePuzzleSource(engineRef) {
+export function usePuzzleSource() {
   const workerRef = useRef(null);
   const jobRef = useRef(0);
   useEffect(() => () => { workerRef.current?.terminate(); workerRef.current = null; }, []);
 
-  return useCallback(({ size, mode, opts, onDone, onFail }) => {
-    const base = (Math.random() * 1e9) | 0;
+  return useCallback(({ size, mode, opts, base = (Math.random() * 1e9) | 0, onDone, onFail }) => {
     const w = workerRef.current || (workerRef.current = makeWorker());
     if (w) {
       const id = ++jobRef.current;
@@ -39,7 +43,9 @@ export function usePuzzleSource(engineRef) {
       w.postMessage({ size, mode, opts, base, budget: TUNING.seedBudget, id });
       return;
     }
-    const { gen } = engineRef.current;
+    /* built for this request's size, not whatever the page is showing */
+    const R = createRules(size, mode);
+    const gen = createGenerator(R, createSolver(R));
     let k = 0;
     const attempt = () => {
       const t1 = performance.now();
@@ -53,5 +59,5 @@ export function usePuzzleSource(engineRef) {
       requestAnimationFrame(attempt);
     };
     requestAnimationFrame(attempt);
-  }, [engineRef]);
+  }, []);
 }

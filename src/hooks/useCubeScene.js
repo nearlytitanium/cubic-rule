@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
 import { DIRS } from "../engine/rules.js";
-import { HEX, SP, GESTURE } from "../ui/theme.js";
+import { HEX, SP, GESTURE, REPLAY, addLights } from "../ui/theme.js";
 
 /* ═══════════════════════════════════════════════════════════════
    useCubeScene — everything three.js.
@@ -22,9 +22,7 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
     rend.setSize(el.clientWidth, el.clientHeight);
     el.appendChild(rend.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.72));
-    const l1 = new THREE.DirectionalLight(0xffffff, 0.7); l1.position.set(4, 9, 7); scene.add(l1);
-    const l2 = new THREE.DirectionalLight(0xBFD4E0, 0.3); l2.position.set(-6, -2, -5); scene.add(l2);
+    addLights(THREE, scene);
 
     const blockGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
     const blockerGeo = new THREE.BoxGeometry(0.98, 0.98, 0.98);
@@ -103,6 +101,10 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
 
     /* ── orientation: snapped to 90° steps, animated ── */
     const orient = new THREE.Quaternion();
+    /* a timed turn (solution replay, restarts); null means the snappy chase below */
+    let turn = null;
+    /* the pose a puzzle was first shown in; restarts return to it exactly */
+    const startPose = new THREE.Quaternion();
     const target = new THREE.Quaternion();
     const WORLD_DOWN = new THREE.Vector3(0, -1, 0);
     const AX_X = new THREE.Vector3(1, 0, 0), AX_Y = new THREE.Vector3(0, 1, 0);
@@ -155,6 +157,18 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
     };
     announceDown();
 
+    /* turn so that `dir` is at the bottom (used when replaying a solution),
+       and whether the cube has finished turning */
+    /* ease "inOut" for turns the player watches (replay, restart);
+       "out" for key presses, so the cube answers the key at once */
+    const turnTo = (to, quarter = REPLAY.turn, ease = "inOut") => {
+      const angle = orient.angleTo(to);
+      if (angle > 0.01) turn = { from: orient.clone(), t0: performance.now(), dur: quarter * Math.sqrt(angle / (Math.PI / 2)), ease };
+      target.copy(to);
+    };
+    const face = (dir) => { turnTo(poseFor(dir, target)); announceDown(); invalidate(); };
+    const posed = () => cube.quaternion.equals(target);
+
     const rotate = (which) => {
       if (gameRef.current.anim) return;
       const q = new THREE.Quaternion();
@@ -162,7 +176,7 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
       else if (which === "down") q.setFromAxisAngle(AX_X, Math.PI / 2);
       else if (which === "left") q.setFromAxisAngle(AX_Y, -Math.PI / 2);
       else q.setFromAxisAngle(AX_Y, Math.PI / 2);
-      target.premultiply(q);
+      turnTo(target.clone().premultiply(q), GESTURE.keyTurn, "out");
       announceDown();
       invalidate();
     };
@@ -192,9 +206,28 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
       cube.add(blockerLines); invalidate();
     };
 
+    /* blocks shrinking away. They are out of g.meshes (a restart reuses
+       the same ids) and each fades on its own clock in the loop, so they
+       can start leaving before the next board even exists. */
+    let leaving = [];
+    const dropMesh = (m) => { group.remove(m); if (m.userData.tmp) m.material.dispose(); };
+    const flushLeaving = () => { leaving.forEach(dropMesh); leaving = []; };
+    const clearOut = () => {
+      const g = gameRef.current, now = performance.now();
+      for (const [, m] of g.meshes) { m.userData.leaveAt = now; leaving.push(m); }
+      g.meshes = new Map();
+      g.anim = null;
+      invalidate();
+    };
+
+    /* opts.restart: the current blocks shrink away, the cube turns to the
+       starting pose, then the blocks appear layer by layer from the floor
+       up. opts.fresh marks a new puzzle, whose starting pose is chosen now
+       (the nearest one with its gravity face down) and remembered. */
     const build = (board, blk, colorOf, dir, opts = {}) => {
       const g = gameRef.current;
-      for (const [, m] of g.meshes) { group.remove(m); if (m.userData.tmp) m.material.dispose(); }
+      if (opts.restart) clearOut();
+      else { flushLeaving(); for (const [, m] of g.meshes) dropMesh(m); }
       g.meshes = new Map();
       const R = engineRef.current.R, n = sizeRef.current;
       const blockerPos = [];
@@ -205,7 +238,9 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
         const ci = (colorOf[bid] - 1) % matByColor.length;
         const m = new THREE.Mesh(blockGeo, matByColor[ci]);
         m.userData.ci = ci;
+        m.userData.at = [x, y, z];
         m.position.set(gp(x), gp(y), gp(z));
+        m.visible = !opts.restart;
         group.add(m); g.meshes.set(bid, m);
       }
       setBlockers(blockerPos);
@@ -213,11 +248,24 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
       g.anim = null; g.used = 0;
       /* pose: snap to the gravity direction (new puzzle, reset), or turn
          towards a given face while the blocks rewind underneath */
-      if (opts.poseDir != null) {
+      if (opts.restart) {
+        if (opts.fresh) startPose.copy(poseFor(dir, target));
+        turnTo(startPose.clone());
+        const { ax, sg } = DIRS[dir];
+        const items = [];
+        for (const [bid, m] of g.meshes) {
+          const c = m.userData.at[ax];
+          items.push({ id: bid, delay: (sg < 0 ? c : n - 1 - c) * SPAWN_STAGGER });
+        }
+        const last = items.reduce((mx, it) => Math.max(mx, it.delay), 0);
+        g.anim = { segs: [{ type: "spawn", items, dur: last + SPAWN, waitPose: true }], i: 0, t0: performance.now() };
+      } else if (opts.poseDir != null) {
         target.copy(poseFor(opts.poseDir, target));
       } else if (!opts.keepOrientation) {
         target.copy(poseFor(dir, target));
+        startPose.copy(target);
         orient.copy(target);
+        turn = null;
         cube.quaternion.copy(target);
       }
       announceDown();
@@ -273,10 +321,18 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
        Blocks accelerate like they are falling, land at different times
        depending on how far they drop, and squash briefly on impact. */
     const FALL_BASE = 130, FALL_PER_UNIT = 95, SQUASH = 130;
+    const VANISH = 240, SPAWN = 320, SPAWN_STAGGER = 70;
+    const fading = (m) => {
+      if (!m.userData.tmp) { m.material = matByColor[m.userData.ci].clone(); m.material.transparent = true; m.userData.tmp = true; }
+      return m.material;
+    };
     const advance = () => {
       const g = gameRef.current, a = g.anim; if (!a) return;
       const seg = a.segs[a.i];
       if (!seg) { g.anim = null; snap(); return; }
+      /* a segment can wait for the cube to finish turning and the old
+         blocks to finish leaving */
+      if (seg.waitPose && (leaving.length || !cube.quaternion.equals(target))) { a.t0 = performance.now(); return; }
       /* rewinds run in two beats: the cube turns back, then the blocks slide */
       if (a.waitPose) {
         if (!cube.quaternion.equals(target)) return;
@@ -315,6 +371,17 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
             it.f[0] + (it.t[0] - it.f[0]) * e,
             it.f[1] + (it.t[1] - it.f[1]) * e,
             it.f[2] + (it.t[2] - it.f[2]) * e);
+        }
+      } else if (seg.type === "spawn") {
+        for (const it of seg.items) {
+          const m = g.meshes.get(it.id); if (!m) continue;
+          const u = Math.min(1, (elapsed - it.delay) / SPAWN);
+          if (u <= 0) continue;
+          const e = 1 - Math.pow(1 - u, 3);
+          m.visible = true;
+          const sc = 0.3 + 0.7 * e;
+          m.scale.set(sc, sc, sc);
+          fading(m).opacity = e;
         }
       } else if (seg.type === "respawn") {
         const u = Math.min(1, elapsed / seg.dur);
@@ -355,9 +422,29 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
     const tick = () => {
       raf = requestAnimationFrame(tick);
       if (!drag && !cube.quaternion.equals(target)) {
-        orient.slerp(target, 0.28);
-        if (orient.angleTo(target) < 0.01) orient.copy(target);
+        if (turn) {
+          const u = Math.min(1, (performance.now() - turn.t0) / turn.dur);
+          const e = turn.ease === "out" ? 1 - Math.pow(1 - u, 3)
+            : u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+          orient.slerpQuaternions(turn.from, target, e);
+          if (u >= 1) { orient.copy(target); turn = null; }
+        } else {
+          orient.slerp(target, 0.28);
+          if (orient.angleTo(target) < 0.01) orient.copy(target);
+        }
         cube.quaternion.copy(orient);
+        invalidate();
+      }
+      if (leaving.length) {
+        const now = performance.now();
+        leaving = leaving.filter((m) => {
+          const u = Math.min(1, (now - m.userData.leaveAt) / VANISH);
+          if (u >= 1) { dropMesh(m); return false; }
+          const e = u * u, sc = 1 - 0.7 * e;
+          m.scale.set(sc, sc, sc);
+          fading(m).opacity = 1 - e;
+          return true;
+        });
         invalidate();
       }
       try { advance(); } catch (err) { console.error(err); gameRef.current.anim = null; snap(); }
@@ -383,6 +470,7 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
     const onDown = (e) => {
       if (gameRef.current.anim) return;
       drag = { x: e.clientX, y: e.clientY, axis: null };
+      turn = null;
       dom.setPointerCapture(e.pointerId);
     };
     const onMove = (e) => {
@@ -415,18 +503,21 @@ export function useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared,
     dom.addEventListener("pointerup", onUp);
     dom.addEventListener("pointercancel", onCancel);
 
+    /* the mount can change size without the window resizing (the layout
+       switches between portrait and landscape), so watch the element */
     const onResize = () => {
       if (!el.clientWidth) return;
       cam.aspect = el.clientWidth / el.clientHeight; cam.updateProjectionMatrix();
       rend.setSize(el.clientWidth, el.clientHeight); frame();
     };
-    window.addEventListener("resize", onResize);
+    const ro = new ResizeObserver(onResize);
+    ro.observe(el);
 
-    api.current = { build, snap, setCage, setInsets, invalidate, gp, rotate, downDir, capturePositions, rewind, FALL_BASE, FALL_PER_UNIT, SQUASH };
+    api.current = { build, snap, setCage, setInsets, invalidate, gp, rotate, face, posed, clearOut, downDir, capturePositions, rewind, FALL_BASE, FALL_PER_UNIT, SQUASH };
 
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
+      ro.disconnect();
       dom.removeEventListener("pointerdown", onDown);
       dom.removeEventListener("pointermove", onMove);
       dom.removeEventListener("pointerup", onUp);

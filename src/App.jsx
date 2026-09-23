@@ -3,109 +3,155 @@ import { TUNING } from "./engine/tuning.js";
 import { DIRS, createRules } from "./engine/rules.js";
 import { createSolver } from "./engine/solver.js";
 import { createGenerator } from "./engine/generator.js";
-import { runSelfTest } from "./engine/selftest.js";
 import { useCubeScene } from "./hooks/useCubeScene.js";
 import { usePuzzleSource } from "./hooks/usePuzzleSource.js";
-import { PAPER, CARD, INK, MUTE, RULE, ACCENT, mono } from "./ui/theme.js";
-import { Btn, Pick, Sheet } from "./ui/controls.jsx";
+import { PAPER, INK, SP, REPLAY } from "./ui/theme.js";
 import { Hud } from "./ui/Hud.jsx";
-import { SolutionPanel } from "./ui/SolutionPanel.jsx";
+import { ClearPopup } from "./ui/ClearPopup.jsx";
+import { TitleScreen, PRESETS, presetLabel } from "./ui/TitleScreen.jsx";
+import { I18nProvider, stringsFor, initialLang, saveLang } from "./i18n.jsx";
+
+/* only the 2×2×2 rule is offered; the engine still knows "221" */
+const MODE = "222";
+
+/* the options are remembered in this browser between visits. Storage can
+   be missing or throw (private windows, blocked site data); then the
+   game simply starts on Normal. */
+const CONFIG_KEY = "cubicrule.config";
+const DEFAULT_CONFIG = (({ size, colors, moves }) => ({ size, colors, moves }))(PRESETS.find((p) => p.id === "normal"));
+function loadConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CONFIG_KEY));
+    if ([4, 5].includes(c?.size) && [1, 2, 3].includes(c?.colors) && c?.moves >= 3 && c?.moves <= 8) {
+      return { size: c.size, colors: c.colors, moves: c.moves };
+    }
+  } catch { /* fall through */ }
+  return DEFAULT_CONFIG;
+}
+function saveConfig(c) {
+  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(c)); } catch { /* not kept */ }
+}
+
+/* every layout fills the window with the HUD in its corners. "wide"
+   (desktop, tablet) is "phone" at a larger size; "land" (phone held
+   sideways) keeps the HUD at the sides, where height is scarce. The
+   camera frames the cube inside the insets, so nothing sits under a
+   button. */
+const layoutFor = (w, h) => (h < 600 && w > h ? "land" : w >= 768 && h >= 600 ? "wide" : "phone");
+const INSETS = {
+  phone: { top: 64, bottom: 100, left: 12, right: 12 },
+  wide: { top: 90, bottom: 112, left: 24, right: 24 },
+  land: { top: 12, bottom: 12, left: 112, right: 112 },
+};
 
 /* ═══════════════════════════════════════════════════════════════
    App
    ═══════════════════════════════════════════════════════════════ */
 export default function App() {
-  const [size, setSize] = useState(5);
-  const [mode, setMode] = useState("222");
-  const [colors, setColors] = useState(2);
-  const [moves, setMoves] = useState(3);
+  /* chosen on the title screen; applies to every puzzle until the next start */
+  const [screen, setScreen] = useState("title");
+  const [lang, setLangState] = useState(initialLang);
+  const setLang = useCallback((l) => { setLangState(l); saveLang(l); }, []);
+  useEffect(() => { document.documentElement.lang = lang; }, [lang]);
+  const t = stringsFor(lang);
+  const [config, setConfig] = useState(loadConfig);
+  const { size } = config;
 
   const [seed, setSeed] = useState(null);
   const [minMoves, setMinMoves] = useState(null);
-  const [genMs, setGenMs] = useState(null);
-  const [info, setInfo] = useState({ blockers: 0, decoys: 0, special: 0, tries: 0 });
   const [used, setUsed] = useState(0);
   const [busy, setBusy] = useState(false);
   const [fail, setFail] = useState(false);
   const [cleared, setCleared] = useState(false);
-  const [chainNote, setChainNote] = useState(0);
-  const [showSol, setShowSol] = useState(false);
+  const [showClear, setShowClear] = useState(false);
+  const [clearedBy, setClearedBy] = useState("player");
   const [solution, setSolution] = useState([]);
-  const [classes, setClasses] = useState([]);
   const [downDir, setDownDir] = useState(null);
   const [playing, setPlaying] = useState(false);
-  const [selfTest, setSelfTest] = useState(null);
-  const [portrait, setPortrait] = useState(true);
-  const [sheet, setSheet] = useState(false);
+  const [layout, setLayout] = useState(() => layoutFor(window.innerWidth, window.innerHeight));
 
   const mountRef = useRef(null);
   const gameRef = useRef({ meshes: new Map(), history: [] });
   const sizeRef = useRef(size);
   const engineRef = useRef(null);
   const engineKey = useRef("");
+  /* the solution replay: bumping the token cancels a replay in flight;
+     `replaying` tells the clear popup who emptied the board */
+  const playToken = useRef(0);
+  const replaying = useRef(false);
+  /* bumped by every request and by leaving for the title, so a late
+     answer from the worker is dropped */
+  const genToken = useRef(0);
 
-  if (engineKey.current !== `${mode}-${size}`) {
-    const R = createRules(size, mode);
+  if (engineKey.current !== `${MODE}-${size}`) {
+    const R = createRules(size, MODE);
     const solver = createSolver(R);
     engineRef.current = { R, solver, gen: createGenerator(R, solver) };
-    engineKey.current = `${mode}-${size}`;
+    engineKey.current = `${MODE}-${size}`;
   }
 
-  const onCleared = useCallback(() => setCleared(true), []);
+  const onCleared = useCallback(() => {
+    setCleared(true); setShowClear(true);
+    setClearedBy(replaying.current ? "replay" : "player");
+  }, []);
   const onDownDir = useCallback((d) => setDownDir(d), []);
   const scene = useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared, onDownDir });
-  const requestPuzzle = usePuzzleSource(engineRef);
+  const requestPuzzle = usePuzzleSource();
 
-  useEffect(() => { setSelfTest(runSelfTest()); }, []);
   useEffect(() => {
-    const read = () => setPortrait(window.innerHeight >= window.innerWidth);
+    const read = () => setLayout(layoutFor(window.innerWidth, window.innerHeight));
     read();
     window.addEventListener("resize", read);
     window.addEventListener("orientationchange", read);
     return () => { window.removeEventListener("resize", read); window.removeEventListener("orientationchange", read); };
   }, []);
-  useEffect(() => {
-    scene.current.setInsets?.(portrait
-      ? { top: 50, bottom: 96, left: 12, right: 12 }
-      : { top: 12, bottom: 12, left: 106, right: 106 });
-  }, [portrait, scene]);
+  useEffect(() => { scene.current.setInsets?.(INSETS[layout]); }, [layout, scene]);
   useEffect(() => { sizeRef.current = size; scene.current.setCage?.(size); }, [size, scene]);
-
-  const refreshClasses = useCallback(() => {
-    const g = gameRef.current, { solver } = engineRef.current;
-    if (!g.board) { setClasses([]); return; }
-    setClasses(solver.classify(g.board, g.blk, g.colorOf, g.dir));
-  }, []);
 
   const install = useCallback((p, keepStart, opts) => {
     const { R } = engineRef.current;
     scene.current.build?.(p.board, p.blk, p.colorOf, p.dir, opts);
     gameRef.current.history = [];
     gameRef.current.start = keepStart || { board: R.clone(p.board), dir: p.dir };
-    refreshClasses();
-  }, [refreshClasses, scene]);
+  }, [scene]);
 
-  const newPuzzle = useCallback(() => {
-    setBusy(true); setFail(false); setCleared(false); setUsed(0);
-    setMinMoves(null); setChainNote(0); setSolution([]); setPlaying(false);
-    const { R } = engineRef.current;
-    const opts = { colors, moves, maxBlockers: Math.round(R.S * TUNING.blockerRatio), nodeCap: TUNING.nodeCap };
-    const t0 = performance.now();
+  /* the current blocks start leaving at once; the new ones are laid in
+     when the worker answers. `cfg` defaults to the current options (the
+     title screen passes the ones just chosen, before they are in state);
+     `base` is a seed to start from, random when omitted. */
+  const newPuzzle = useCallback((cfg = config, base) => {
+    playToken.current++; replaying.current = false;
+    const token = ++genToken.current;
+    scene.current.clearOut?.();
+    setBusy(true); setFail(false); setCleared(false); setShowClear(false); setUsed(0);
+    setMinMoves(null); setSolution([]); setPlaying(false); setSeed(null);
+    const opts = {
+      colors: cfg.colors, moves: cfg.moves,
+      maxBlockers: Math.round(cfg.size ** 3 * TUNING.blockerRatio), nodeCap: TUNING.nodeCap,
+    };
     requestPuzzle({
-      size, mode, opts,
-      onDone: (p, s, tries) => {
-        install(p);
+      size: cfg.size, mode: MODE, opts, base,
+      onDone: (p, s) => {
+        if (token !== genToken.current) return;
+        install(p, null, { restart: true, fresh: true });
         setSolution(p.solution);
         setMinMoves(p.solution.length);
-        setInfo({ blockers: p.blockers, decoys: p.decoys, special: p.special, tries });
-        setSeed(s); setGenMs(Math.round(performance.now() - t0));
+        setSeed(s);
         setBusy(false);
       },
-      onFail: (tally) => { if (tally) console.warn("generation gave up", tally); setBusy(false); setFail(true); },
+      onFail: (tally) => {
+        if (token !== genToken.current) return;
+        if (tally) console.warn("generation gave up", tally);
+        setBusy(false); setFail(true);
+      },
     });
-  }, [colors, moves, size, mode, install, requestPuzzle]);
+  }, [config, install, requestPuzzle, scene]);
 
-  useEffect(() => { const t = setTimeout(newPuzzle, 0); return () => clearTimeout(t); }, [newPuzzle]);
+  const start = useCallback((cfg, base) => {
+    setConfig(cfg); saveConfig(cfg);
+    setScreen("play");
+    newPuzzle(cfg, base ?? undefined);
+  }, [newPuzzle]);
 
   /* build the fall animation: each block gets its own duration by distance */
   const drop = useCallback((nd) => {
@@ -130,9 +176,9 @@ export default function App() {
 
     const axis = DIRS[nd].ax;
     let prev = posMap(g.board);
-    const segs = []; let chains = 0;
+    const segs = [];
     for (const f of frames) {
-      if (f.cleared) { segs.push({ type: "clear", ids: f.cleared, dur: 260 }); chains++; }
+      if (f.cleared) segs.push({ type: "clear", ids: f.cleared, dur: 260 });
       else {
         const cur = posMap(f.board), map = [];
         let longest = 0;
@@ -149,25 +195,30 @@ export default function App() {
     }
     g.board = next; g.dir = nd; g.used = (g.used ?? 0) + 1;
     g.anim = { segs, i: 0, t0: performance.now() };
-    setUsed(g.used); setChainNote(chains); refreshClasses();
+    setUsed(g.used);
     scene.current.invalidate?.();
-  }, [refreshClasses, scene]);
+  }, [scene]);
 
   const onRotate = useCallback((which) => {
     if (busy || cleared || playing) return;
     scene.current.rotate?.(which);
   }, [busy, cleared, playing, scene]);
 
+  /* once the board is cleared the same button (and key) moves on */
   const onDrop = useCallback(() => {
-    if (busy || cleared || playing) return;
+    if (busy || playing) return;
+    if (cleared) { newPuzzle(); return; }
     const d = scene.current.downDir?.();
     if (d == null) return;
     drop(d);
-  }, [busy, cleared, playing, drop, scene]);
+  }, [busy, cleared, playing, drop, newPuzzle, scene]);
 
-  /* keyboard: arrows turn the cube, space drops it */
+  /* keyboard: arrows turn the cube, space drops it — only while playing,
+     and never while typing into a field */
   useEffect(() => {
+    if (screen !== "play") return;
     const onKey = (e) => {
+      if (e.target instanceof HTMLInputElement) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       const map = {
         ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
@@ -178,7 +229,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onRotate, onDrop]);
+  }, [screen, onRotate, onDrop]);
 
   const undo = useCallback(() => {
     const g = gameRef.current;
@@ -193,93 +244,87 @@ export default function App() {
     scene.current.rewind?.(from);
     gameRef.current.history = rest;
     gameRef.current.used = rest.length;
-    setUsed(rest.length); setCleared(false); setChainNote(0);
+    setUsed(rest.length); setCleared(false); setShowClear(false);
   }, [busy, playing, install, scene]);
 
   const reset = useCallback(() => {
     const g = gameRef.current; if (!g.start || busy) return;
-    install({ board: g.start.board, blk: g.blk, colorOf: g.colorOf, dir: g.start.dir }, g.start);
-    setUsed(0); setCleared(false); setChainNote(0);
+    playToken.current++; replaying.current = false; setPlaying(false);
+    install({ board: g.start.board, blk: g.blk, colorOf: g.colorOf, dir: g.start.dir }, g.start, { restart: true });
+    setUsed(0); setCleared(false); setShowClear(false);
   }, [busy, install]);
 
-  const autoPlay = useCallback(() => {
-    if (busy || playing || !solution.length) return;
-    reset(); setPlaying(true);
+  /* skipping shows the answer: back to the start if needed, then each
+     move of the solution in turn — the cube turns to the face it drops
+     towards, so the replay can be followed. Once it is cleared the usual
+     popup and "next" button take over. */
+  const skip = useCallback(() => {
+    if (busy || playing) return;
+    if (cleared || !solution.length) { newPuzzle(); return; }
+    /* nothing dropped yet (or all undone): the board already is the
+       starting one, so the replay can begin without rebuilding it */
+    if (gameRef.current.history?.length) reset();
+    const token = ++playToken.current;
+    replaying.current = true;
+    setPlaying(true);
     let i = 0;
-    const run = () => {
+    const alive = () => playToken.current === token;
+    const step = () => {
+      if (!alive()) return;
       if (i >= solution.length) { setPlaying(false); return; }
-      if (gameRef.current.anim) { setTimeout(run, 120); return; }
-      drop(solution[i]); i++;
-      setTimeout(run, 320);
+      if (gameRef.current.anim) { setTimeout(step, 120); return; }
+      scene.current.face?.(solution[i]);
+      const land = () => {
+        if (!alive()) return;
+        if (!scene.current.posed?.()) { setTimeout(land, 60); return; }
+        setTimeout(() => {
+          if (!alive()) return;
+          drop(solution[i]); i++;
+          setTimeout(step, 320);
+        }, REPLAY.hold);
+      };
+      setTimeout(land, 160);
     };
-    setTimeout(run, 360);
-  }, [busy, playing, solution, reset, drop]);
+    setTimeout(step, 360);
+  }, [busy, playing, cleared, solution, newPuzzle, reset, drop, scene]);
 
-  const canDrop = !busy && !cleared && !playing && downDir != null && gameRef.current.dir !== downDir;
-  const nextHint = showSol && used < solution.length && downDir === solution[used];
+  const canNext = cleared && !busy && !playing;
+  const canDrop = canNext || (!busy && !cleared && !playing && downDir != null && gameRef.current.dir !== downDir);
 
-  const tags = [
-    info.special === 2 ? "色をまたぐ手" : info.special === 3 ? "連鎖あり" : null,
-    info.decoys > 0 ? "囮あり" : null,
-  ].filter(Boolean);
+  /* no status line: the one thing that is always there, the drop button,
+     says what is going on when it cannot drop */
+  const dropLabel = busy ? t.generating : fail ? t.failed : playing ? t.replaying : cleared ? t.next : t.drop;
 
-  const status = busy ? "生成中"
-    : fail ? "この条件では作れません"
-    : playing ? "自動再生中"
-    : cleared ? `全消し — ${used}手`
-    : chainNote > 1 ? `${chainNote}連鎖`
-    : tags.length ? tags.join(" / ")
-    : "灰色は動かせないマス";
+  const toTitle = useCallback(() => {
+    playToken.current++; genToken.current++; replaying.current = false;
+    setPlaying(false); setBusy(false); setFail(false); setShowClear(false);
+    scene.current.clearOut?.();
+    setScreen("title");
+  }, [scene]);
 
+  const menu = [
+    { label: t.restart, onClick: reset },
+    { label: t.skip, onClick: skip },
+    { label: t.toTitle, onClick: toTitle },
+  ];
+  const menuNote = `${presetLabel(config, t)}${t.sep}${t.summary(config)}${t.sep}seed ${seed ?? "–"}`;
+
+  /* the tree keeps the same shape in every layout, so the canvas mount
+     is never replaced — only classes and styles change */
   return (
-    <div className="min-h-screen w-full" style={{ background: PAPER, color: INK }}>
-      <div className="mx-auto max-w-md px-4 py-5">
-        <div className="relative"
-          style={{ height: portrait ? "min(66vh, 560px)" : "min(82vh, 460px)", background: CARD, border: `1px solid ${RULE}` }}>
-          <div ref={mountRef} className="absolute inset-0" />
-          <Hud portrait={portrait} minMoves={minMoves} used={used} cleared={cleared} status={status}
-            canDrop={canDrop} hint={nextHint} onDrop={onDrop}
-            onUndo={undo} canUndo={!!used && !busy && !playing} />
-        </div>
+    <I18nProvider lang={lang} setLang={setLang}>
+      <div className="fixed inset-0 overflow-hidden" style={{ background: PAPER, color: INK }}>
+        <div ref={mountRef} className="absolute inset-0" />
+        <Hud layout={layout} minMoves={minMoves} used={used} cleared={cleared}
+          canDrop={canDrop} onDrop={onDrop} dropLabel={dropLabel}
+          onUndo={undo} canUndo={!!used && !busy && !playing} menu={menu} menuNote={menuNote} />
 
-        <div className="mt-2 text-center text-[10px]" style={{ ...mono, color: MUTE }}>
-          上下で底面を入れ替え、左右で見回し
-        </div>
-
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <Btn onClick={reset}>最初から</Btn>
-          <Btn onClick={() => setSheet(true)}>設定</Btn>
-          <Btn onClick={newPuzzle} primary>次の問題</Btn>
-        </div>
-
-        {showSol && (
-          <SolutionPanel solution={solution} used={used} classes={classes} seed={seed} downDir={downDir}
-            onAutoPlay={autoPlay} canAutoPlay={!!solution.length && !playing} />
+        {showClear && (
+          <ClearPopup replay={clearedBy === "replay"} used={used} minMoves={minMoves} onReset={reset} onNext={() => newPuzzle()} onClose={() => setShowClear(false)} />
         )}
 
-        <Sheet open={sheet} onClose={() => setSheet(false)}>
-          <div className="mb-3 text-[10px] tracking-[0.3em]" style={{ ...mono, color: MUTE }}>OPTIONS</div>
-          <div className="grid grid-cols-3 gap-3">
-            <Pick label="盤サイズ" value={size} onChange={setSize} options={[{ v: 4, l: "4³" }, { v: 5, l: "5³" }]} />
-            <Pick label="消滅条件" value={mode} onChange={setMode} options={[{ v: "222", l: "2×2×2" }, { v: "221", l: "2×2×1" }]} />
-            <Pick label="色数" value={colors} onChange={setColors} options={[1, 2, 3].map((v) => ({ v, l: `${v}` }))} />
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <Pick label="手数の下限" value={moves} onChange={setMoves} options={[3, 4, 5, 6, 7, 8].map((v) => ({ v, l: `${v}` }))} />
-            <Pick label="解答（開発用）" value={showSol} onChange={setShowSol}
-              options={[{ v: false, l: "隠す" }, { v: true, l: "表示" }]} />
-          </div>
-          <div className="mt-4 text-[10px] leading-relaxed" style={{ ...mono, color: MUTE }}>
-            障害{info.blockers} ／ {info.tries}試行 ／ {genMs ?? "–"}ms ／ seed {seed ?? "–"}
-          </div>
-          <div className="mt-2 px-3 py-2 text-[11px]"
-            style={{ ...mono, border: `1px solid ${selfTest && selfTest.length ? ACCENT : RULE}`, color: selfTest && selfTest.length ? ACCENT : MUTE }}>
-            {selfTest === null ? "自己診断 実行中"
-              : selfTest.length === 0 ? "自己診断 全項目パス"
-              : `自己診断 失敗: ${selfTest.join(", ")}`}
-          </div>
-        </Sheet>
+        {screen === "title" && <TitleScreen config={config} onStart={start} />}
       </div>
-    </div>
+    </I18nProvider>
   );
 }

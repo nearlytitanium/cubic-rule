@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubic Rule — 生成アルゴリズム開発記録</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700;900&family=M+PLUS+1+Code:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#E7ECEF;
+  --card:#F6F8F9;
+  --ink:#132133;
+  --mute:#6B7B8C;
+  --rule:#B9C4CC;
+  --keep:#C8102E;      /* 採用 */
+  --drop:#7C8B99;      /* 棄却 */
+  --grid:rgba(19,33,51,.055);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Zen Kaku Gothic New",system-ui,sans-serif;
+  font-weight:400;
+  line-height:1.85;
+  font-feature-settings:"palt" 1;
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:28px 28px;
+}
+.wrap{max-width:920px;margin:0 auto;padding:0 24px}
+.mono{font-family:"M PLUS 1 Code",ui-monospace,monospace;font-feature-settings:normal}
+
+/* ── hero ───────────────────────────────────────── */
+.hero{padding:88px 0 64px;border-bottom:2px solid var(--ink)}
+.eyebrow{
+  font-family:"M PLUS 1 Code",monospace;font-size:11px;font-weight:500;
+  letter-spacing:.34em;color:var(--mute);text-transform:uppercase;
+}
+h1{
+  font-weight:900;font-size:clamp(30px,6.4vw,58px);line-height:1.14;
+  letter-spacing:-.02em;margin:18px 0 0;
+}
+h1 .thin{font-weight:400;color:var(--mute);display:block;font-size:.42em;letter-spacing:.04em;margin-top:14px;line-height:1.7}
+.lede{margin:32px 0 0;max-width:44em;font-size:clamp(15px,2.4vw,17px)}
+.lede strong{font-weight:700;border-bottom:2px solid var(--keep);padding-bottom:1px}
+
+.tally{display:flex;flex-wrap:wrap;gap:0;margin:44px 0 0;border:1px solid var(--rule);background:var(--card)}
+.tally div{flex:1 1 120px;padding:18px 20px;border-right:1px solid var(--rule)}
+.tally div:last-child{border-right:0}
+.tally b{display:block;font-family:"M PLUS 1 Code",monospace;font-size:34px;font-weight:600;line-height:1}
+.tally span{display:block;font-size:11px;letter-spacing:.16em;color:var(--mute);margin-top:8px}
+.tally .k b{color:var(--keep)}
+.tally .d b{color:var(--drop)}
+
+/* ── sections ───────────────────────────────────── */
+section{padding:64px 0;border-bottom:1px solid var(--rule)}
+h2{
+  font-size:12px;font-family:"M PLUS 1 Code",monospace;font-weight:600;
+  letter-spacing:.28em;color:var(--mute);margin:0 0 26px;
+}
+h3{font-size:19px;font-weight:700;margin:38px 0 10px;letter-spacing:-.01em}
+h3:first-of-type{margin-top:0}
+p{margin:0 0 16px;max-width:46em}
+.note{color:var(--mute);font-size:14px}
+
+/* ── pipeline diagram ───────────────────────────── */
+.pipe{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);margin:8px 0 26px}
+.pipe > div{background:var(--card);padding:20px}
+.pipe h4{margin:0 0 8px;font-size:14px;font-weight:700}
+.pipe p{margin:0;font-size:13px;color:var(--mute);line-height:1.7}
+.pipe .trust{background:#fff;box-shadow:inset 0 0 0 2px var(--keep)}
+.pipe .trust h4{color:var(--keep)}
+@media(max-width:680px){.pipe{grid-template-columns:1fr}}
+
+/* ── ledger : the signature ─────────────────────── */
+.ledger{margin-top:8px}
+.row{
+  border-top:1px solid var(--rule);padding:26px 0;
+  display:grid;grid-template-columns:56px 1fr 300px;gap:24px;align-items:start;
+}
+.row:last-child{border-bottom:1px solid var(--rule)}
+.no{font-family:"M PLUS 1 Code",monospace;font-size:12px;font-weight:600;color:var(--mute);padding-top:4px}
+.what h4{margin:0 0 6px;font-size:16px;font-weight:700;letter-spacing:-.01em}
+.what p{margin:0;font-size:13.5px;color:var(--mute);line-height:1.75}
+.verdict{font-family:"M PLUS 1 Code",monospace;font-size:11px;font-weight:600;letter-spacing:.2em;margin-bottom:10px}
+.keep .verdict{color:var(--keep)}
+.drop .verdict{color:var(--drop)}
+.drop .what h4{color:var(--drop)}
+
+/* measurement bars — a rejected change makes the bar grow to the right */
+.bars{font-family:"M PLUS 1 Code",monospace;font-size:11px;color:var(--mute)}
+.bar{display:flex;align-items:center;gap:8px;margin-top:6px}
+.bar .lab{width:44px;flex:none;text-align:right}
+.bar .track{flex:1;height:11px;background:rgba(19,33,51,.07);position:relative;overflow:visible}
+.bar .fill{
+  position:absolute;left:0;top:0;bottom:0;background:var(--ink);
+  width:0;transition:width .9s cubic-bezier(.2,.7,.2,1);
+}
+.keep .bar.after .fill{background:var(--keep)}
+.drop .bar.after .fill{background:var(--drop)}
+.bar .val{width:74px;flex:none}
+.metric{font-family:"M PLUS 1 Code",monospace;font-size:12px;line-height:1.9;color:var(--ink)}
+.metric em{font-style:normal;color:var(--mute)}
+@media(max-width:760px){
+  .row{grid-template-columns:44px 1fr;gap:16px}
+  .measure{grid-column:2}
+}
+
+/* ── numbered procedure (the steps really are a sequence) ── */
+.steps{list-style:none;padding:0;margin:6px 0 22px;counter-reset:s}
+.steps li{
+  counter-increment:s;position:relative;padding:16px 0 16px 52px;
+  border-bottom:1px solid var(--rule);
+}
+.steps li:first-child{border-top:1px solid var(--rule)}
+.steps li::before{
+  content:counter(s,upper-alpha);position:absolute;left:0;top:15px;
+  font-family:"M PLUS 1 Code",monospace;font-size:12px;font-weight:600;
+  color:var(--keep);border:1px solid var(--rule);background:var(--card);
+  width:28px;height:28px;display:grid;place-items:center;
+}
+.steps b{display:block;font-size:15px;font-weight:700;margin-bottom:4px}
+.steps span{display:block;font-size:13.5px;color:var(--mute);line-height:1.75}
+.steps .fail{
+  display:inline-block;margin-top:6px;font-family:"M PLUS 1 Code",monospace;
+  font-size:11px;color:var(--drop);border-left:2px solid var(--rule);padding-left:8px;
+}
+.gate{background:var(--card);border:1px solid var(--rule);padding:20px 22px;margin:6px 0 22px}
+.gate h4{margin:0 0 10px;font-size:15px;font-weight:700}
+.gate ol{margin:0;padding-left:20px;font-size:14px}
+.gate li{margin-bottom:6px}
+.gate li:last-child{margin-bottom:0}
+
+/* ── tables ─────────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-family:"M PLUS 1 Code",monospace;font-size:13px;margin:6px 0 20px}
+caption{text-align:left;font-family:"Zen Kaku Gothic New",sans-serif;font-size:13px;color:var(--mute);padding-bottom:10px}
+th,td{padding:9px 12px;border-bottom:1px solid var(--rule);text-align:right}
+th:first-child,td:first-child{text-align:left}
+thead th{font-size:11px;letter-spacing:.12em;color:var(--mute);font-weight:500;border-bottom:1px solid var(--ink)}
+tbody tr:hover{background:var(--card)}
+td.hi{color:var(--keep);font-weight:600}
+
+/* ── takeaways ──────────────────────────────────── */
+.take{border-left:2px solid var(--keep);padding:2px 0 2px 22px;margin:26px 0}
+.take h4{margin:0 0 6px;font-size:16px;font-weight:700}
+.take p{margin:0;font-size:14.5px}
+.inv{list-style:none;padding:0;margin:0}
+.inv li{padding:14px 0;border-bottom:1px solid var(--rule);font-size:14.5px}
+.inv li:first-child{border-top:1px solid var(--rule)}
+.inv code{font-family:"M PLUS 1 Code",monospace;font-size:13px;background:var(--card);padding:1px 6px;border:1px solid var(--rule)}
+
+footer{padding:56px 0 96px;color:var(--mute);font-size:12px}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .6s ease,transform .6s ease}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none;transition:none}
+  .bar .fill{transition:none}
+}
+:focus-visible{outline:2px solid var(--keep);outline-offset:3px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Cubic Rule / Generator Engineering Log</div>
+    <h1>直感は、4回外れた。
+      <span class="thin">立体パズルの問題生成アルゴリズムを作りながら、<br>何を測り、何を捨てたかの記録</span></h1>
+    <p class="lede">
+      改善案を13個試した。うち6個は速くならなかったか、原理的に成立しなかった。
+      速くなった7個のうち、事前の見立てが当たっていたのは3個だけで、
+      残りは<strong>計測してから決めたもの</strong>だ。この記録の主役は、採用された最適化ではなく棄却されたほうにある。
+    </p>
+
+    <div class="tally">
+      <div class="k"><b>7</b><span>採用</span></div>
+      <div class="d"><b>6</b><span>棄却・中止</span></div>
+      <div><b>9</b><span>手 まで生成可</span></div>
+      <div><b>3</b><span>回の重大バグ</span></div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap reveal">
+    <h2>0 — 対象</h2>
+    <h3>ルール</h3>
+    <p>
+      立方体の中に色付きブロックが入っている。立方体を回して底面を選び、落とす。
+      全ブロックがその向きに落ち、同じ色が2×2×2の立方体を作ると消える。消えたあとも詰まるので連鎖する。
+      全部消せばクリア。動かせない「障害物」のマスがあり、落下はそこで止まる。
+    </p>
+    <p>
+      手は「立方体に対する6方向のうち、現在の重力と異なる5つ」。分岐は常に5で、これが以降のすべての計算量を決める。
+    </p>
+    <h3>解くべき問題</h3>
+    <p>
+      出題する盤面は、<em>必ず解けて</em>、<em>表示した手数がその真の最短</em>でなければならない。
+      この2つを保証しながら、1問を実用的な時間で作るのが課題だった。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>1 — 構造</h2>
+    <h3>生成器は提案し、探索器が証明する</h3>
+    <p>
+      逆生成は「解ける問題を作る手続き」に見えるが、それ自体は保証にならない。実際、後述するバグで
+      生成器は不正な問題を吐き続けた。それでも一度も外に出なかったのは、信頼の境界を1箇所に絞ったからだ。
+    </p>
+    <div class="pipe">
+      <div>
+        <h4>生成器</h4>
+        <p>全消し状態から逆再生し、盤面と手順の候補を作る。ヒューリスティックであり、正しさは一切主張しない。</p>
+      </div>
+      <div class="trust">
+        <h4>certify — 唯一の関門</h4>
+        <p>完成した盤面に手順を頭から再生し、全消しに至ることを確認する。存在証明そのもの。落ちた候補は理由付きで捨てる。</p>
+      </div>
+      <div>
+        <h4>探索器</h4>
+        <p>真の最短手数を出す。素直な幅優先版を参照実装として残し、高速版と常に突き合わせる。</p>
+      </div>
+    </div>
+    <p class="note">
+      不変条件はひとつ。<strong>検証を通っていない盤面は描画に届かない。</strong>
+      この境界があるおかげで、生成器をどれだけ書き換えても品質は落ちなかった。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>2 — 生成アルゴリズム</h2>
+    <h3>全消し状態から逆に組む</h3>
+    <p>
+      空の盤面から出発し、「この1手で消えた組」を戻す操作を繰り返す。手順は逆順に積み上がり、
+      最後にできあがった盤面が問題になる。探索は使わない。1ステップにつき落下シミュレーションを数回走らせるだけだ。
+    </p>
+
+    <h3>手の設計図をまず引く</h3>
+    <p>
+      1色あたり8個で固定しているので、色数から「消す手」の数が決まる。要求された手数がそれを上回るぶんは、
+      消さずに崩すだけの手で埋める。この配列が逆再生の設計図になる。逆順の先頭は最後の一手にあたるので、必ず消す手を置く。
+    </p>
+    <table>
+      <caption>ステップの種類（逆順に並べる）</caption>
+      <thead><tr><th>種類</th><th>消える組</th><th>役割</th></tr></thead>
+      <tbody>
+        <tr><td>CLEAR</td><td>1</td><td>基本。1手で1組が消える</td></tr>
+        <tr><td>TWIN</td><td>2（同時）</td><td>1手で2色ぶんが同時に消える。色ごとに片づけられなくなる</td></tr>
+        <tr><td>CHAIN</td><td>2（連鎖）</td><td>1組が消えて落ちた結果、もう1組が成立する</td></tr>
+        <tr><td>REARRANGE</td><td>0</td><td>崩すだけ。手数を伸ばすための埋め手</td></tr>
+      </tbody>
+    </table>
+    <p class="note">
+      TWINとCHAINの区別は、消滅処理が何巡したかで判定している。1巡なら同時、2巡以上なら連鎖。
+      どちらを入れるかは問題ごとに乱数で決まる。
+    </p>
+
+    <h3>1ステップの中身</h3>
+    <ol class="steps">
+      <li>
+        <b>消滅直前の盤面を作る</b>
+        <span>消える組を空きマスに戻す。その位置に元から何か乗っていた場合は、組の厚みぶん持ち上げる。連鎖や同時消しの場合はこれを2回重ねる。</span>
+      </li>
+      <li>
+        <b>浮いたブロックに支えを置く</b>
+        <span>落下方向の隣が空いているブロックの真下に、障害物を追加する。必要な場所にだけ置くので、障害物の配置がそのまま「なぜそこに棚があるか」の説明になっている。</span>
+      </li>
+      <li>
+        <b>流入方向を選ぶ</b>
+        <span>ひとつ前の状態がどの向きで安定していたか、6方向を「追加で必要な障害物が少ない順」に並べて順に試す。障害物の消費を抑えるための貪欲な順序づけ。</span>
+      </li>
+      <li>
+        <b>前の状態を作る</b>
+        <span>ブロックを1〜3個だけ落下方向と逆に持ち上げる。着地先の候補が複数あるときは、すでに支えのある位置を優先する。持ち上げないと前状態が現在と同一になり、手として成立しない。</span>
+      </li>
+      <li>
+        <b>前向きに証明する</b>
+        <span>作った前状態から実際に落として、狙った盤面に戻ることを確認する。さらに、そこまでに積み上げた全手順を頭から再生し、全消しに至ることも毎回確認する。</span>
+        <span class="fail">後のステップで足した障害物が前のステップを壊すため、この全手順の再確認は省略できない（試行05）</span>
+      </li>
+    </ol>
+
+    <h3>最後に無料の1手を足す</h3>
+    <p>
+      現在の重力軸に沿った反転は対合で、区間内のブロックの順序を保ったまま反対端へ整列させる。
+      逆像が必ず存在し、障害物も要らない。これを最外側に1回だけ前置すると、手数が1増え、
+      同時に<strong>ブロックが乗っている面と解法で使う面がずれる</strong>ので、障害物の配置から解法を読み取りにくくなる。
+      内側に置くと後続の障害物に壊されるため、1回が上限になる。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>3 — 検証アルゴリズム</h2>
+    <h3>受理の条件はひとつの関数にある</h3>
+    <p>
+      生成器が返した候補は、この関門を通るまで一切信用しない。落ちた候補は必ず理由を持って返るので、
+      失敗の内訳がそのまま集計できる。
+    </p>
+    <div class="gate">
+      <h4>certify — 3つの検査</h4>
+      <ol>
+        <li><b>手順が通るか。</b> 完成した盤面に保存した手順を頭から再生し、色付きブロックが1つ残らず消えることを確認する。これが存在証明そのもの。</li>
+        <li><b>短すぎないか。</b> 真の最短手数を求め、要求された下限を満たすか見る。逆再生の手数は上限でしかない。</li>
+        <li><b>囮があるか。</b> 要求された場合のみ。今すぐ何かを消せるのに最短手順から外れる手が、1つ以上あるか調べる。</li>
+      </ol>
+    </div>
+
+    <h3>最短手数の求め方</h3>
+    <p>
+      反復深化の深さ優先探索。深さの上限を1手ずつ伸ばし、最初に見つかった解が最短になる。分岐は5なので
+      再探索の無駄は25%程度にとどまり、幅優先と違ってメモリは深さぶんしか使わない。
+    </p>
+    <ul class="inv">
+      <li><b>置換表</b>は53ビットの数値鍵。独立した32ビットのハッシュを2本合成している。1本だと20万ノード規模で衝突が現実に起き、衝突は「解を見落として手数を過大に報告する」という静かな誤りになる。</li>
+      <li><b>盤面バッファ</b>は深さごとに1本。同じ階層の枝は順番に見るので、1階層につき1本で足りる。探索中の確保はゼロ。</li>
+      <li><b>同一視</b>は色と重力方向で行う。ブロックの個体差は探索に関係しないので、鍵を作るときに色へ射影する。</li>
+    </ul>
+
+    <h3>参照実装を残す</h3>
+    <p>
+      素直な幅優先・文字列鍵の版を消さずに置いてある。両者は最短手数を求める部分だけが違い、
+      検証・分類・囮判定は完全に共有している。起動時の自己診断で、ランダムな局面と生成した問題の両方について
+      2つの実装が同じ答えを返すことを確認する。速度のために可読性を落としても、正しさはこれで担保される。
+    </p>
+
+    <h3>ついでに分かること</h3>
+    <p>
+      1手シミュレートするだけで、その局面の5手は4つに分類できる。<strong>消える</strong>（ブロックが減るので絶対に戻せない）、
+      <strong>動かない</strong>（すでにその向きで安定）、<strong>戻せる</strong>（逆向きに倒すと完全に元へ戻る）、
+      <strong>戻せない</strong>（動くが情報が失われる）。実測すると、戻せる手は各局面にほぼ1つで、それは常に反転だった。
+      落下が非可逆であることの直接の裏づけになっている。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>4 — 試行台帳</h2>
+    <p class="note" style="margin-bottom:26px">
+      バーは変更前を基準にした所要時間。<strong>棄却されたものは右に伸びる</strong>——遅くなったということだ。
+    </p>
+
+    <div class="ledger">
+
+      <div class="row drop">
+        <div class="no">01</div>
+        <div class="what">
+          <h4>落下だけで 2×2×2 を成立させる</h4>
+          <p>盤ごと傾ける手だけで、同色8個の立方体を作らせようとした。落下は必ず全ブロックを壁に密着させるので、宙に浮いた配置に到達できない。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">棄却 — 原理的に不可能</div>
+          <div class="metric">4³ 単色8個 <em>可解</em> <b>0 / 60</b><br><em>打ち切りではなく到達不能。探索空間を全部見て解なし</em></div>
+        </div>
+      </div>
+
+      <div class="row drop">
+        <div class="no">02</div>
+        <div class="what">
+          <h4>落下のまま逆生成する</h4>
+          <p>ルービックキューブを崩すように、全消し状態から逆再生して問題を作る案。落下は多対一で情報を捨てるため、逆操作が一意でないどころか存在しない。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">棄却 — 逆像が存在しない</div>
+          <div class="metric">逆傾けの成功 <b>0 回</b><br><em>シャッフルが常に0手で止まり、1手詰めしか作れない</em></div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">03</div>
+        <div class="what">
+          <h4>動かせないマス（障害物）を入れる</h4>
+          <p>落下が障害物で止まることで、ブロックが中空に留まれるようになる。01で潰れていた配置が到達可能になり、2×2×2が復活した。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用 — コンセプトの復活</div>
+          <div class="metric">
+            障害物 0 個 <em>可解率</em> <b>0%</b><br>
+            障害物 3 個 <em>可解率</em> <b>2%</b><br>
+            障害物 6 個 <em>可解率</em> <b>10%</b>
+          </div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">04</div>
+        <div class="what">
+          <h4>障害物を「生成時の自由変数」にする</h4>
+          <p>逆再生の途中で支えが足りない場所に、後から障害物を置いてしまう。盤面をルールに合わせるのではなく、意図した手順が通るように盤面を作る。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用 — 探索が不要に</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">≈1000ms</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="0.5"></i></span><span class="val">4.5ms</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>1手につき落下シミュレーション1回のみ。100倍以上</em></div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">05</div>
+        <div class="what">
+          <h4>全手順を毎ステップ検証する</h4>
+          <p>後のステップで足した障害物が、前のステップの検証を無効にしていた。各ステップでその時点までの手順を通しで再生し、壊れていれば即座に別候補へ切り替える。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用 — 最大の一撃</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">4000試行</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="3"></i></span><span class="val">117試行</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>下限5手の生成。検証失敗が全体の93%を占めていた</em></div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">06</div>
+        <div class="what">
+          <h4>手数を「ちょうどN手」から「N手以上」へ</h4>
+          <p>逆再生の手数は上限でしかなく、実際にはより短い解が見つかることがある。それを理由に捨てていたが、真の最短が下限を満たしていれば採用するようにした。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用</div>
+          <div class="metric"><em>捨てる理由がひとつ減った。難易度は真の最短で表示するので嘘にならない</em></div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">07</div>
+        <div class="what">
+          <h4>探索を反復深化＋数値キーに</h4>
+          <p>幅優先はフロンティアを丸ごと保持するため、深さ6で37MB前後を抱えていた。加えて1ノードあたり126文字の鍵を組み立てていた。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用 — 深いほど効く</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">2497ms</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="52"></i></span><span class="val">1296ms</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>下限7手／1問あたり。鍵は独立2本の32bitを53bitに合成し衝突を回避</em></div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">08</div>
+        <div class="what">
+          <h4>探索中の確保をゼロにする</h4>
+          <p>1ノードごとに125要素の配列を新規確保していた。深さ優先では同じ階層の枝を順番に見るので、階層あたり1本のバッファで足りる。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">1437ms</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="71"></i></span><span class="val">1024ms</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>20万ノードぶんの確保とGCが消えた</em></div>
+        </div>
+      </div>
+
+      <div class="row drop">
+        <div class="no">09</div>
+        <div class="what">
+          <h4>一致判定の遅延マスク化</h4>
+          <p>一致が無い局面では作業バッファのクリアを省く。ほとんどの局面は何も一致しないので効くはずだった。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">棄却 — 誤差の範囲</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">3882ms</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="96"></i></span><span class="val">3742ms</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>4%。ここは主因ではなかった</em></div>
+        </div>
+      </div>
+
+      <div class="row drop">
+        <div class="no">10</div>
+        <div class="what">
+          <h4>一致判定のビットボード化</h4>
+          <p>色ごとの占有をUint32に載せ、2×2×2判定を8方向シフトのANDにする案。畳み込みとして定式化でき、筋は良かった。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">中止 — プロファイルで却下</div>
+          <div class="metric">1ノードの内訳 <em>落下</em> <b>74%</b> ／ <em>一致判定</em> <b>14%</b> ／ <em>鍵</em> <b>14%</b><br><em>上限14%の改善に、ルール中核の書き換えは見合わない</em></div>
+        </div>
+      </div>
+
+      <div class="row keep">
+        <div class="no">11</div>
+        <div class="what">
+          <h4>落下処理の最適化</h4>
+          <p>プロファイルが指した本命。呼び出しごとの作業配列確保をやめ、セル位置の計算を軸ごとの索引表に置き換えた。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">採用</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">1910ns</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="58"></i></span><span class="val">1117ns</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>落下1回あたり。下限7手の生成は1024→907ms</em></div>
+        </div>
+      </div>
+
+      <div class="row drop">
+        <div class="no">12</div>
+        <div class="what">
+          <h4>構成の途中で最短性を検査する</h4>
+          <p>7ステップ組んでから「実は1手で解ける」と分かって捨てる例が多かった。浅い段階で打ち切れば無駄が減るはずだった。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">棄却 — 4倍以上遅化</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">1176ms</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="290"></i></span><span class="val">5146ms</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>短い解を持つ盤面は探索が即座に見つけるので、無駄はもともと安かった</em></div>
+        </div>
+      </div>
+
+      <div class="row drop">
+        <div class="no">13</div>
+        <div class="what">
+          <h4>可逆な手（反転）を複数前置する</h4>
+          <p>反転は対合で、逆像が必ず存在し障害物も要らない。何度も挟めばタダで手数を稼げるはずだった。</p>
+        </div>
+        <div class="measure">
+          <div class="verdict">棄却 — 構造的に +1 が上限</div>
+          <div class="bars">
+            <div class="bar"><span class="lab">前</span><span class="track"><i class="fill" data-w="100"></i></span><span class="val">94ms</span></div>
+            <div class="bar after"><span class="lab">後</span><span class="track"><i class="fill" data-w="290"></i></span><span class="val">327ms</span></div>
+          </div>
+          <div class="metric" style="margin-top:8px"><em>反転が無料なのは最外側にあるときだけ。内側は後続の障害物に壊される</em></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>5 — 計測</h2>
+
+    <table>
+      <caption>最終的な生成性能（5³ / 2×2×2 / 2色 / 反復深化）</caption>
+      <thead><tr><th>手数の下限</th><th>1問あたり</th><th>試行回数</th><th>実際の最短</th></tr></thead>
+      <tbody>
+        <tr><td>4手</td><td>16 ms</td><td>17</td><td>4〜5手</td></tr>
+        <tr><td>5手</td><td class="hi">77 ms</td><td>63</td><td>6手</td></tr>
+        <tr><td>6手</td><td>176 ms</td><td>110</td><td>6〜7手</td></tr>
+        <tr><td>7手</td><td>907 ms</td><td>451</td><td>7〜8手</td></tr>
+        <tr><td>8手</td><td>1449 ms</td><td>335</td><td>8〜9手</td></tr>
+      </tbody>
+    </table>
+
+    <table>
+      <caption>1ノードあたりのコスト内訳（20万回の実測、最適化前）</caption>
+      <thead><tr><th>処理</th><th>1回</th><th>割合</th></tr></thead>
+      <tbody>
+        <tr><td>落下</td><td>1082 ns</td><td class="hi">74%</td></tr>
+        <tr><td>一致判定</td><td>209 ns</td><td>14%</td></tr>
+        <tr><td>鍵の計算</td><td>207 ns</td><td>14%</td></tr>
+      </tbody>
+    </table>
+
+    <table>
+      <caption>生成時間の内訳（下限6手）</caption>
+      <thead><tr><th>段階</th><th>割合</th></tr></thead>
+      <tbody>
+        <tr><td>逆生成による構成</td><td>6%</td></tr>
+        <tr><td>探索（最短性の確認を含む）</td><td class="hi">94%</td></tr>
+      </tbody>
+    </table>
+
+    <p class="note">
+      この最後の表が、試行12と13を止めた根拠になった。構成側をどう作り直しても、上限は6%の改善でしかない。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>6 — 踏んだバグ</h2>
+
+    <div class="take">
+      <h4>後から足した障害物が、前の検証を壊す</h4>
+      <p>逆再生は各ステップを「その時点の盤面」で検証するが、完成した盤面にはその後で足された障害物が乗っている。生成の93%がこれで失敗していた。同じ構造のバグを、生成器で2回、リファクタリング中に1回踏んだ。</p>
+    </div>
+
+    <div class="take">
+      <h4>同じルールを2箇所に実装していた</h4>
+      <p>探索は色の配列、描画は個体IDの配列で動いていた。片方だけ直すとブロックが宙に浮いたまま固まる。盤面表現を1つに統一し、障害物を別マスクに分離して、この不具合クラスごと消した。</p>
+    </div>
+
+    <div class="take">
+      <h4>時計が入ると再現できない</h4>
+      <p>生成の打ち切りに経過時間を使っていたため、同じシードでも環境や負荷で違う問題が出ていた。試行回数での打ち切りに変えて決定性を回復した。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap reveal">
+    <h2>7 — 残した不変条件</h2>
+    <ul class="inv">
+      <li>検証を通っていない盤面は描画に届かない。後処理を足すなら、触ったあとに必ず再検証する。</li>
+      <li>盤面表現は<code>Int16Array</code>ひとつ。空きは<code>-1</code>、障害物は盤面に現れず別マスクに持つ。</li>
+      <li>素直な幅優先の探索を参照実装として残し、起動時の自己診断で高速版と最短手数を突き合わせる。</li>
+      <li>生成に時計を使わない。同じシードなら同じ問題。</li>
+      <li>すべての却下に理由を付ける。<code>construction-failed</code> <code>solvable-in-fewer-moves</code> のように集計できる形で返す。</li>
+    </ul>
+  </div>
+</section>
+
+<section style="border-bottom:0">
+  <div class="wrap reveal">
+    <h2>8 — 結論</h2>
+    <p style="font-size:clamp(17px,3vw,21px);font-weight:700;line-height:1.7;max-width:24em">
+      この規模になると、直感より計装のほうが安い。
+    </p>
+    <p>
+      止めた3つの最適化（遅延マスク・ビットボード化・構成中の最短性チェック）は、どれも「無駄を減らせば速くなる」という筋で考えたものだった。
+      実際のボトルネックは受理された問題の全深度探索で、そこは最短手数を正確に出す以上は削れない。
+      効いたのは、測ってから決めた落下処理と確保の排除だけだ。
+    </p>
+    <p>
+      同じことは診断機能にも言える。開発中に3回、ソースを文字列置換して計装した。3回目でようやく却下理由を返す仕組みを入れたが、
+      それが最初に役立った相手は、その仕組みを入れたリファクタリング自身が生んだバグだった。
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Cubic Rule — 生成アルゴリズム開発記録 / 数値はすべてNode上の実測値、盤サイズ5³・消滅条件2×2×2・2色を基準とする
+  </div>
+</footer>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var fills = [].slice.call(document.querySelectorAll('.fill'));
+  var reveals = [].slice.call(document.querySelectorAll('.reveal'));
+
+  function paint(el){
+    var w = parseFloat(el.getAttribute('data-w'));
+    /* 100 = 変更前の所要時間。棄却された変更はこれを超えて伸びる */
+    el.style.width = Math.min(w, 300) / 3 + '%';
+  }
+  if (reduce || !('IntersectionObserver' in window)) {
+    fills.forEach(paint);
+    reveals.forEach(function(r){ r.classList.add('in'); });
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (!e.isIntersecting) return;
+      e.target.classList.add('in');
+      [].slice.call(e.target.querySelectorAll('.fill')).forEach(function(f, i){
+        setTimeout(function(){ paint(f); }, 80 + i * 70);
+      });
+      io.unobserve(e.target);
+    });
+  }, { threshold: 0.12 });
+  reveals.forEach(function(r){ io.observe(r); });
+})();
+</script>
+</body>
+</html>

@@ -5,9 +5,12 @@ import { createSolver } from "./engine/solver.js";
 import { createGenerator } from "./engine/generator.js";
 import { useCubeScene } from "./hooks/useCubeScene.js";
 import { usePuzzleSource } from "./hooks/usePuzzleSource.js";
+import { useBgm } from "./hooks/useBgm.js";
 import { PAPER, INK, SP, REPLAY } from "./ui/theme.js";
 import { Hud } from "./ui/Hud.jsx";
 import { ClearPopup } from "./ui/ClearPopup.jsx";
+import { BgmBar, BGM_SLOT } from "./ui/BgmBar.jsx";
+import { SoundNotice } from "./ui/SoundNotice.jsx";
 import { TitleScreen, PRESETS, presetLabel } from "./ui/TitleScreen.jsx";
 import { I18nProvider, stringsFor, initialLang, saveLang } from "./i18n.jsx";
 
@@ -97,6 +100,13 @@ export default function App() {
   const onDownDir = useCallback((d) => setDownDir(d), []);
   const scene = useCubeScene({ mountRef, engineRef, gameRef, sizeRef, onCleared, onDownDir });
   const requestPuzzle = usePuzzleSource();
+
+  /* BGM follows the scene, and while solving, how far the puzzle has got */
+  const bgm = useBgm();
+  const { setScene: setBgmScene, setProgress: setBgmProgress } = bgm;
+  const bgmScene = screen === "title" ? "title" : cleared && clearedBy === "player" ? "clear" : "play";
+  useEffect(() => { setBgmScene(bgmScene); }, [setBgmScene, bgmScene]);
+  useEffect(() => { setBgmProgress(used, minMoves ?? 0); }, [setBgmProgress, used, minMoves]);
 
   useEffect(() => {
     const read = () => setLayout(layoutFor(window.innerWidth, window.innerHeight));
@@ -317,13 +327,16 @@ export default function App() {
         <div ref={mountRef} className="absolute inset-0" />
         <Hud layout={layout} minMoves={minMoves} used={used} cleared={cleared}
           canDrop={canDrop} onDrop={onDrop} dropLabel={dropLabel}
-          onUndo={undo} canUndo={!!used && !busy && !playing} menu={menu} menuNote={menuNote} />
+          onUndo={undo} canUndo={!!used && !busy && !playing} menu={menu} menuNote={menuNote}
+          reserveRight={bgm.available ? BGM_SLOT : 0} />
 
         {showClear && (
           <ClearPopup replay={clearedBy === "replay"} used={used} minMoves={minMoves} onReset={reset} onNext={() => newPuzzle()} onClose={() => setShowClear(false)} />
         )}
 
         {screen === "title" && <TitleScreen config={config} onStart={start} />}
+        <BgmBar mountRef={bgm.mountRef} layout={layout} available={bgm.available} trackUrl={bgm.trackUrl} />
+        {!bgm.asked && bgm.available && <SoundNotice onChoose={bgm.choose} />}
       </div>
     </I18nProvider>
   );

@@ -60,7 +60,7 @@ function MenuButton({ items, note, large }) {
    everywhere else. "land" (phones held sideways) keeps the HUD at the
    sides, where height is scarce; "phone" and "wide" share one
    arrangement at two sizes. */
-export function Hud({ layout, minMoves, used, cleared, canDrop, onDrop, dropLabel, onUndo, canUndo, menu, menuNote }) {
+export function Hud({ layout, minMoves, used, cleared, canDrop, onDrop, dropLabel, onUndo, canUndo, menu, menuNote, reserveRight = 0 }) {
   const { t } = useI18n();
   const wide = layout === "wide", land = layout === "land";
   const undoBtn = (
@@ -124,12 +124,15 @@ export function Hud({ layout, minMoves, used, cleared, canDrop, onDrop, dropLabe
         <div className={`flex items-start ${wide ? "gap-4" : "gap-3"}`}>{menuBtn}{title}</div>
         {counter}
       </div>
+      {/* phones keep the buttons on the bottom edge, with room at the end of
+          the row for the BGM pill, and the guide above them */}
       <div className="mx-auto w-full" style={{ maxWidth: 520 }}>
-        <div className="flex gap-2" style={{ pointerEvents: "auto" }}>
+        {!wide && guide("mb-2 text-center text-[10px]")}
+        <div className="flex gap-2" style={{ pointerEvents: "auto", marginRight: wide ? 0 : reserveRight }}>
           <div style={{ width: 92 }} className="flex flex-col">{undoBtn}</div>
           <div className="flex-1 flex flex-col">{dropBtn}</div>
         </div>
-        {guide("mt-2 text-center text-[10px]")}
+        {wide && guide("mt-2 text-center text-[10px]")}
       </div>
     </div>
   );

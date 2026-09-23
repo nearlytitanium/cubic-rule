@@ -44,6 +44,12 @@ const STRINGS = {
     replayNote: "「最初から」で挑戦し直せます",
     bestNote: "最短手数で解きました",
     shorterNote: (k) => `あと ${k} 手縮められます`,
+
+    soundTitle: "BGM が流れます",
+    soundBody: "このゲームは音楽が鳴ります。音量にご注意ください。画面の BGM ボタンでいつでも切り替えられます。",
+    soundOn: "音ありではじめる",
+    soundOff: "音なし",
+    openTrack: "この曲を DiscoFunc で開く",
   },
   en: {
     rules: ["Turn the cube to choose the floor, then drop.", "Same-colour blocks forming a 2×2×2 cube vanish.", "Clear every block to win."],
@@ -81,6 +87,12 @@ const STRINGS = {
     replayNote: "Press Restart to try it yourself",
     bestNote: "Solved in the fewest moves",
     shorterNote: (k) => `It can be done in ${k} fewer move${k > 1 ? "s" : ""}`,
+
+    soundTitle: "This game has music",
+    soundBody: "Music will play — mind your volume. You can switch it on or off at any time with the BGM button.",
+    soundOn: "Play with sound",
+    soundOff: "Mute",
+    openTrack: "Open this track in DiscoFunc",
   },
 };
 

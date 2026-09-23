@@ -74,7 +74,12 @@ npm run preview   # dist/ をローカルで確認
 
 ## 公開
 
-`npm run build` で出力される `dist/` をそのまま静的ホスティングに置く。
+**https://nearlytitanium.github.io/cubic-rule/**
+
+`main` への push で GitHub Actions（`.github/workflows/deploy.yml`）が自己診断・ビルドを行い、GitHub Pages に公開する。
+自己診断が失敗した場合は公開しない。
+
+ほかの静的ホスティングに置く場合も、`npm run build` で出力される `dist/` をそのまま置けばよい。
 アセットは相対パスで参照しているので、ドメイン直下でもサブパス（GitHub Pages の `/<repo>/` など）でも動く。
 BGM のために実行時に `https://discofunc.com` を読み込む（上記）。
 

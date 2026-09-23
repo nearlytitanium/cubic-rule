@@ -111,4 +111,11 @@ src/
 scripts/selftest.js  npm test の本体
 ```
 
-生成アルゴリズムの設計と計測の経緯は `cubic-rule-engineering-log.html` を、分割前の単一ファイル版は `cube-engine.jsx` を参照。
+生成アルゴリズムの設計と計測の経緯は [`docs/engineering-log.html`](docs/engineering-log.html)（単一ファイルだった頃の記録）を参照。
+
+## ライセンス
+
+ソースコードは [MIT License](LICENSE)。
+
+「Cubic Rule」の名称とロゴはこのライセンスの対象外で、フォークや派生作品では別の名前を使ってほしい。
+BGM は [DiscoFunc](https://discofunc.com)（MIT License）のプレイヤーを実行時に読み込んで再生している。

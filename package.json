@@ -2,7 +2,13 @@
   "name": "cubic-rule",
   "private": true,
   "version": "0.1.0",
+  "description": "A 3D falling-block puzzle: turn the cube, drop, and clear same-colour 2×2×2 cubes.",
+  "license": "MIT",
+  "author": "NearlyTitanium",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
